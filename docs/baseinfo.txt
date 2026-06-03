@@ -1,0 +1,93 @@
+# K1 Drone 项目 - 基础信息
+
+## 项目概况
+- **比赛**: 全国大学生嵌入式比赛
+- **周期**: 一个月
+- **职责**: 主控板（模型量化 + 无人机通信）
+- **队友**: 纪同学（气象识别模型 - PyTorch）、黎同学（ArduPilot 飞控 - GPIO UART）
+- **同学**: 大一机械专业，有STM32基础，已读完K1文档
+
+## 关键决策
+1. 使用 ROS2（进迭时空官方提供 ROS2_LXQT 方案，完整支持 K1）
+2. 语音交互暂不做（预留接口）
+3. 纪同学模型若不可用 → 用进迭时空 AI Robot 方案做视觉识别（目标检测、姿态识别）
+4. 黎同学用 UART/GPIO 与飞控通信
+
+## 进迭时空文档关键发现（于 2026-06-03 抓取）
+
+### ROS2 支持
+- ROS2_LXQT 专用系统镜像下载: https://archive.spacemit.com/ros2/bianbu-ros-images/v1.5/ROS2_LXQT-v1.5-20251216.zip
+- 支持 K1 (MUSE Pi / Pi Pro / BOOK) + K3 平台
+- 系统架构: Bianbu OS → ROS2 → MediaEngine → RDK
+
+### AI Robot 方案核心组件
+- **MediaEngine**: IO HUB 数据枢纽（零拷贝）、软硬 Pipeline 加速、低延迟直显（1080P@120FPS 编码，适合无人机）、OpenCL 加速
+- **RVV-Opt Libs**: OpenCV RVV 优化、Eigen/OpenBLAS、AI 算子库、ONNX Runtime/llama.cpp 加速后端
+- **RDK**: 量化工具链、Model Zoo（YOLO/ResNet/MobileNet 等）、ASR/TTS/VAD
+
+### 系统预装功能（ROS2_LXQT）
+- 桌面: LXQt, Chromium, VSCodium, Docker, VNC
+- AI: ONNX Runtime(硬件加速), Ollama, llama.cpp, xquant(量化工具)
+- 机器人: ROS2 感知/推理/交互接口、ByteTrack、SVO、建图导航、WebSocket
+- 工业: EtherCAT, CAN, RS485/232 (PreemptRT)
+
+### 关键文档 CDN
+- ROS2 K1 概述: https://cdn-resource.spacemit.com/software/SDK/ros/docs-ros/zh/k1/intro.md
+- ROS2 系统配置: https://cdn-resource.spacemit.com/software/SDK/ros/docs-ros/zh/k1/02_System_configuration/2.1_System_Functional_Specification.md
+- 更多文档路径可通过 API 获取: https://www.spacemit.com/api-server/document/get-doc-tree?language=zh
+
+---
+
+## 项目架构
+
+### 目录结构（K1: ~/drone_project）
+```
+drone_project/
+├── ros2_ws/src/
+│   ├── drone_bringup/       # 启动文件（launch 全家桶）
+│   ├── drone_communication/ # UART/MAVLink 与 ArduPilot 通信
+│   ├── drone_inference/     # ONNX 推理（目标检测 + 气象分类）
+│   ├── drone_vision/        # 摄像头采集（V4L2 / MediaEngine）
+│   └── drone_interfaces/    # 自定义 ROS2 msg
+├── models/
+│   ├── spacemit_demo/       # 进迭时空参考模型（YOLO等）
+│   └── weather/             # 纪同学的气象模型
+├── config/
+│   └── hardware.yaml        # 硬件参数配置
+├── scripts/
+│   └── setup_ros2.sh        # ROS2 工作空间构建脚本
+├── docs/                    # 项目文档
+├── tests/                   # 测试
+└── third_party/             # 第三方依赖
+```
+
+### 数据流
+```
+  摄像头(MIPI/USB)
+       ↓
+  drone_vision (camera_node)
+       ↓ /camera/image_raw
+  drone_inference (inference_node)
+       │  ├─ 目标检测 (YOLOv8n INT8) ← fallback
+       │  └─ 气象分类 (weather_model) ← 纪同学模型
+       ↓ /drone/inference_result
+  drone_communication (mavlink_node)
+       ↓ UART (MAVLink v2)
+  ArduPilot 飞控 (黎同学)
+```
+
+### 5个ROS2包说明
+| 包 | 语言 | 功能 |
+|---|---|---|
+| drone_interfaces | msg | Detection2D, DroneStatus, InferenceResult |
+| drone_communication | Python | UART ↔ MAVLink 解析 ↔ 飞控指令 |
+| drone_inference | Python | ONNX Runtime 推理（NPU加速预留） |
+| drone_vision | Python | V4L2 摄像头采集 → ROS Image |
+| drone_bringup | launch | 一键启动所有节点 |
+
+### 下一步计划
+1. [ ] 决定 ROS2 安装方式（刷 ROS2_LXQT 镜像 vs 手动安装）
+2. [ ] ROS2 通信调试（UART ↔ ArduPilot）
+3. [ ] 下载进迭时空参考模型（YOLO等）
+4. [ ] 模型量化流程搭建
+5. [ ] 纪同学模型集成接口

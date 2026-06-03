@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypesets="g"?>
+<package format="3">
+  <name>drone_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch files and configurations for K1 drone system</description>
+  <maintainer email="bianbu@spacemit.com">bianbu</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>drone_communication</exec_depend>
+  <exec_depend>drone_inference</exec_depend>
+  <exec_depend>drone_vision</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
