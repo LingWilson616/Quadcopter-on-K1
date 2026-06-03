@@ -1,0 +1,27 @@
+# ROS2 parameter file — auto-loaded by launch
+# Override with: ros2 launch drone_bringup drone.launch.py --ros-args --params-file <path>
+
+camera_node:
+  ros__parameters:
+    camera_device: "/dev/video0"
+    camera_format: "YUYV"
+    image_width: 640
+    image_height: 480
+    fps: 30
+
+inference_node:
+  ros__parameters:
+    model_path: "/home/bianbu/drone_project/models/spacemit_demo/yolov8n_int8.onnx"
+    confidence_threshold: 0.5
+    use_npu: true
+    task_type: "object_detection"
+
+weather_node:
+  ros__parameters:
+    model_path: "/home/bianbu/drone_project/models/weather/weather_model.onnx"
+    task_type: "weather_classification"
+
+mavlink_node:
+  ros__parameters:
+    uart_device: "/dev/ttyS0"
+    baud_rate: 57600
