@@ -2,6 +2,7 @@
 import cv2
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
@@ -44,7 +45,7 @@ class CameraNode(Node):
 
     def destroy(self):
         self.cap.release()
-        super().destroy()
+        super().destroy_node()
 
 
 def main(args=None):
@@ -52,7 +53,9 @@ def main(args=None):
     node = CameraNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    node.destroy()
-    rclpy.shutdown()
+    finally:
+        node.destroy()
+        if rclpy.ok():
+            rclpy.shutdown()
