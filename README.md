@@ -16,7 +16,7 @@
 ## 数据流
 
 ```
-摄像头(MIPI/USB)
+摄像头(USB UVC MJPG 1280x720@25fps /dev/video20)
     ↓
 drone_vision (camera_node)
     ↓ /camera/image_raw
@@ -44,7 +44,7 @@ drone_communication (mavlink_node)
 | drone_interfaces | msg | Detection2D, DroneStatus, InferenceResult 消息定义 | 已就绪 |
 | drone_communication | Python | UART ↔ MAVLink v2 ↔ ArduPilot（pyserial + pymavlink） | **已实测通过** |
 | drone_inference | Python | ONNX Runtime 推理（目标检测+气象分类） | 框架就绪，待模型 |
-| drone_vision | Python | V4L2 摄像头采集 → ROS Image | 已就绪 |
+| drone_vision | Python | V4L2 摄像头采集 → ROS Image（USB UVC, MJPG 1280x720@25fps） | **已实测通过** |
 | drone_bringup | launch | 一键启动所有节点 + 参数管理 | 已就绪 |
 
 ### MAVLink 节点详情
@@ -85,15 +85,31 @@ scp -r ros2_ws/src/* bianbu@<board-ip>:~/drone_project/ros2_ws/src/
 
 # K1 板
 ssh bianbu@<board-ip>
-source /opt/ros/humble/setup.bash
+source /opt/bros/humble/setup.bash
 cd ~/drone_project/ros2_ws
 colcon build --symlink-install
 ```
 
-### 3. 手动测试 MAVLink
+### 3. 手动测试摄像头
 
 ```bash
-source /opt/ros/humble/setup.bash
+source /opt/bros/humble/setup.bash
+source ~/drone_project/ros2_ws/install/setup.bash
+
+# 启动摄像头节点
+ros2 run drone_vision camera_node --ros-args -p camera_device:=/dev/video20
+
+# 另一个终端：查看实时图像话题
+ros2 topic echo /camera/image_raw --once | head -20
+
+# 截图保存到 /home/bianbu/camera_latest.jpg（VS Code 直接打开）
+python3 ~/snap.py
+```
+
+### 4. 手动测试 MAVLink
+
+```bash
+source /opt/bros/humble/setup.bash
 source ~/drone_project/ros2_ws/install/setup.bash
 
 # 启动节点（如遇权限问题：sudo chmod 666 /dev/ttyACM0）
@@ -101,7 +117,7 @@ ros2 run drone_communication mavlink_node \
   --ros-args -p uart_device:=/dev/ttyACM0 -p baud_rate:=57600
 
 # 另一个终端：查看飞控实时数据
-source /opt/ros/humble/setup.bash
+source /opt/bros/humble/setup.bash
 source ~/drone_project/ros2_ws/install/setup.bash
 ros2 topic echo /drone/status
 
@@ -116,17 +132,17 @@ ros2 topic pub /drone/command std_msgs/msg/String "{data: 'RTL'}"
 ros2 topic pub /drone/command std_msgs/msg/String "{data: 'GUIDED 22.5 113.9 50'}"
 ```
 
-### 4. Launch 方式启动（全部节点）
+### 5. Launch 方式启动（全部节点）
 
 ```bash
 ros2 launch drone_bringup drone.launch.py uart_device:=/dev/ttyACM0
 ```
 
-### 5. 调参（无需重新编译）
+### 6. 调参（无需重新编译）
 
 ```bash
 ros2 launch drone_bringup drone.launch.py \
-  camera_device:=/dev/video1 \
+  camera_device:=/dev/video20 \
   uart_device:=/dev/ttyACM0 \
   baud_rate:=115200
 ```
@@ -138,6 +154,13 @@ ros2 launch drone_bringup drone.launch.py \
 - `drone_inference/inference_node.py` — YOLO 后处理（模型输出转检测框）
 - 模型量化流程（Spacemit NPU 执行提供者）
 - 纪同学气象模型集成（`weather_node` 中确认 weather_classes）
+
+## 摄像头
+
+- **设备**: Microdia Integrated Camera (USB UVC, `/dev/video20`)
+- **格式**: MJPG 1280x720@25fps（YUYV 1280x720@10fps 备选）
+- **后端**: V4L2 优先，GStreamer fallback
+- **截图**: `python3 ~/snap.py` → `/home/bianbu/camera_latest.jpg`
 
 ## 关键资源
 
