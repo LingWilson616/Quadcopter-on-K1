@@ -11,16 +11,26 @@ def generate_launch_description():
     params_file = os.path.join(pkg_share, 'config', 'params.yaml')
 
     return LaunchDescription([
-        DeclareLaunchArgument('camera_device', default_value='/dev/video0'),
+        # ── Camera ──
+        DeclareLaunchArgument('camera_device', default_value='/dev/video20'),
+        DeclareLaunchArgument('camera_format', default_value='MJPG'),
+        DeclareLaunchArgument('image_width', default_value='1280'),
+        DeclareLaunchArgument('image_height', default_value='720'),
+        DeclareLaunchArgument('fps', default_value='25'),
+
+        # ── UART ──
+        DeclareLaunchArgument('uart_device', default_value='/dev/ttyACM0'),
         DeclareLaunchArgument('baud_rate', default_value='57600'),
-        DeclareLaunchArgument('uart_device', default_value='/dev/ttyS0'),
 
         # Camera node
         Node(
             package='drone_vision',
             executable='camera_node',
             name='camera_node',
-            parameters=[params_file],
+            parameters=[params_file, {
+                'camera_device': LaunchConfiguration('camera_device'),
+                'camera_format': LaunchConfiguration('camera_format'),
+            }],
             output='screen',
             respawn=True,
             respawn_delay=2.0,
@@ -42,7 +52,10 @@ def generate_launch_description():
             package='drone_communication',
             executable='mavlink_node',
             name='mavlink_node',
-            parameters=[params_file],
+            parameters=[params_file, {
+                'uart_device': LaunchConfiguration('uart_device'),
+                'baud_rate': LaunchConfiguration('baud_rate'),
+            }],
             output='screen',
             respawn=True,
             respawn_delay=2.0,

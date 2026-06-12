@@ -3,11 +3,11 @@
 
 # Camera
 camera:
-  device: "/dev/video0"      # MIPI CSI camera
-  format: "YUYV"
-  width: 640
-  height: 480
-  fps: 30
+  device: "/dev/video20"     # USB camera (Microdia, uvcvideo)
+  format: "MJPG"             # MJPG: 1280x720@25fps; YUYV: 1280x720@10fps
+  width: 1280
+  height: 720
+  fps: 25
 
 # UART to ArduPilot (GPIO UART)
 uart:

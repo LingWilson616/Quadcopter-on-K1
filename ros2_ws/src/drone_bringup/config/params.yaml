@@ -3,11 +3,11 @@
 
 camera_node:
   ros__parameters:
-    camera_device: "/dev/video0"
-    camera_format: "YUYV"
-    image_width: 640
-    image_height: 480
-    fps: 30
+    camera_device: "/dev/video20"
+    camera_format: "MJPG"
+    image_width: 1280
+    image_height: 720
+    fps: 25
 
 inference_node:
   ros__parameters:
