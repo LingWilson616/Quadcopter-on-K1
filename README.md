@@ -1,17 +1,15 @@
 # Quadcopter-on-K1
 
-# Quadcopter-on-K1
-
-基于进迭时空 SPACEMIT K1 (MUSE Pi Pro) 的四轴无人机系统
+基于进迭时空 SPACEMIT K1 (MUSE Pi Pro) 的 ROS2 无人机视觉系统。
 
 全国大学生嵌入式比赛项目。
 
 ## 项目概况
 
-- **主控板**: K1 (MUSE Pi Pro) — 模型量化 + 无人机通信（ROS2 Humble）
-- **队友**: 纪同学（气象识别模型 PyTorch）、黎同学（ArduPilot 飞控）
-- **飞控**: MicoAir743-AIO (ArduPilot)，通过 USB CDC ACM 连接 K1
-- **系统架构**: Bianbu OS → ROS2 Humble → pyserial + pymavlink
+- **主控板**: K1 (MUSE Pi Pro) — YOLOv8 人物检测 + UART 通信（ROS2 Humble）
+- **队友**: 黎同学（ArduPilot 飞控, GPIO UART）
+- **飞控**: ArduPilot on MicoAir743-AIO，通过 UART 连接 K1
+- **推理**: YOLOv8n 320×320 INT8 + SpaceMIT Execution Provider（~18 FPS ROS2 管道）
 
 ## 数据流
 
@@ -20,150 +18,137 @@
     ↓
 drone_vision (camera_node)
     ↓ /camera/image_raw
-drone_inference (inference_node)
-    │ ├─ 目标检测 (YOLOv8n INT8)
-    │ └─ 气象分类 (weather_model)
+drone_inference (inference_node)  ← YOLOv8n INT8 + SpaceMIT EP
     ↓ /drone/inference_result
 drone_communication (mavlink_node)
-    ↓ /dev/ttyACM0 (MAVLink v2)
+    ↓ UART (MAVLink v2)
 ArduPilot 飞控（黎同学）
     │
-    ↑ 反馈数据
-    │ ATTITUDE, GLOBAL_POSITION_INT, SYS_STATUS ...
+    ↑ 遥测数据 (ATTITUDE, GLOBAL_POSITION_INT, SYS_STATUS ...)
 drone_communication (mavlink_node)
-    ↓ /drone/status (5Hz 发布)
+    ↓ /drone/status (5Hz)
 控制台 / 其他 ROS2 节点
 ```
 
-**双向通信**：mavlink_node 不仅往下发指令（ARM/TAKEOFF/LAND/RTL），还持续接收飞控遥测（姿态角、GPS位置、速度、电池），通过 `/drone/status` 话题发布。
-
 ## ROS2 包
 
-| 包 | 类型 | 功能 | 状态 |
-|---|---|---|---|
-| drone_interfaces | msg | Detection2D, DroneStatus, InferenceResult 消息定义 | 已就绪 |
-| drone_communication | Python | UART ↔ MAVLink v2 ↔ ArduPilot（pyserial + pymavlink） | **已实测通过** |
-| drone_inference | Python | ONNX Runtime 推理（目标检测+气象分类） | 框架就绪，待模型 |
-| drone_vision | Python | V4L2 摄像头采集 → ROS Image（USB UVC, MJPG 1280x720@25fps） | **已实测通过** |
-| drone_bringup | launch | 一键启动所有节点 + 参数管理 | 已就绪 |
+| 包 | 功能 | 状态 |
+|---|---|---|
+| drone_interfaces | Detection2D, DroneStatus, InferenceResult | 已就绪 |
+| drone_vision | V4L2 USB 摄像头 → ROS Image (MJPG 1280x720@25fps) | **已实测通过** |
+| drone_inference | YOLOv8n INT8 + SpaceMIT EP 人物检测 | **已实测通过** |
+| drone_communication | UART ↔ MAVLink v2 (pyserial + pymavlink) | **已实测通过** |
+| drone_bringup | Launch 文件 + 参数管理 | 已就绪 |
 
-### MAVLink 节点详情
+## 推理性能
 
-`drone_communication/mavlink_node.py`（~255 行）— 已通过 K1 + MicoAir743-AIO 实测验证。
+| 模型 | EP 推理 | 预处理 | 后处理 | 总耗时 | FPS |
+|------|---------|--------|--------|--------|-----|
+| YOLOv8n 192×320 INT8 | 10ms | 8ms | 17ms | 36ms | **28** |
+| YOLOv8n 320×320 INT8 | 14ms | 9ms | 24ms | 54ms | **18** |
 
-**设计决策**：不使用 pymavlink 的 `mavutil`（K1 USB CDC ACM 驱动间歇性空读导致 mavutil 频繁误判断连），改用 pyserial 直读 + `parse_char` 逐字节解析，容忍 ACM 抽风。
-
-**错误处理分层**：
-1. ACM 空读 → 重试 → 重建串口
-2. CRC 噪声 → 跳过坏字节 → parse_char 内部自动重同步
-3. 未预期异常 → 打 traceback → 线程不死
-
-**关键特性**：
-- 心跳保持（1Hz）→ 飞控数据流不超时
-- 自动断线重连（1.5s 恢复）
-- MAVLink 命令支持：ARM / TAKEOFF / LAND / RTL / GUIDED
-- 5Hz ROS2 发布，数据实时反映飞控角度变化
+模型文件: `~/spacemit-demo/examples/CV/yolov8/model/yolov8n_*.q.onnx`（预量化，开箱即用）
 
 ## 快速开始
 
-### 1. 环境准备（K1 板）
+### 1. 依赖安装
 
 ```bash
-# ROS2 Humble（K1 预装或手动安装）
-sudo apt install -y ros-humble-ros-base ros-dev-tools python3-colcon-common-extensions
+# ONNX Runtime + SpaceMIT EP（必须）
+sudo apt-get install -y spacemit-onnxruntime python3-spacemit-ort
+sudo chmod 666 /dev/tcm                     # EP 必做！否则段错误
 
-# 项目依赖
-sudo apt install -y ros-humble-cv-bridge ros-humble-image-transport python3-serial
+# 拉取预量化模型
+git clone https://gitee.com/bianbu/spacemit-demo.git ~/spacemit-demo
+cd ~/spacemit-demo/examples/CV/yolov8/model && bash download_model.sh
+
+# ROS2 基础依赖
+sudo apt-get install -y ros-humble-cv-bridge python3-serial
 pip3 install pymavlink
 ```
 
 ### 2. 部署与编译
 
 ```bash
-# 本地（Windows 主机）→ K1
-scp -r ros2_ws/src/* bianbu@<board-ip>:~/drone_project/ros2_ws/src/
+# 本地 → K1
+scp -r ros2_ws/src/* bianbu@10.171.220.9:~/drone_project/ros2_ws/src/
+scp config/* bianbu@10.171.220.9:~/drone_project/config/
 
 # K1 板
-ssh bianbu@<board-ip>
+ssh bianbu@10.171.220.9
 source /opt/bros/humble/setup.bash
-cd ~/drone_project/ros2_ws
+cd ~/drone_project
 colcon build --symlink-install
 ```
 
-### 3. 手动测试摄像头
+### 3. 启动
 
 ```bash
 source /opt/bros/humble/setup.bash
 source ~/drone_project/ros2_ws/install/setup.bash
 
-# 启动摄像头节点
-ros2 run drone_vision camera_node --ros-args -p camera_device:=/dev/video20
+# 全节点
+ros2 launch drone_bringup drone.launch.py
 
-# 另一个终端：查看实时图像话题
-ros2 topic echo /camera/image_raw --once | head -20
-
-# 截图保存到 /home/bianbu/camera_latest.jpg（VS Code 直接打开）
-python3 ~/snap.py
+# 覆盖参数
+ros2 launch drone_bringup drone.launch.py \
+  model_path:=/path/to/model.onnx \
+  confidence_threshold:=0.5 \
+  uart_device:=/dev/ttyACM0
 ```
 
-### 4. 手动测试 MAVLink
+### 4. 调试命令
 
 ```bash
-source /opt/bros/humble/setup.bash
-source ~/drone_project/ros2_ws/install/setup.bash
+# 推理结果
+ros2 topic echo /drone/inference_result
 
-# 启动节点（如遇权限问题：sudo chmod 666 /dev/ttyACM0）
-ros2 run drone_communication mavlink_node \
-  --ros-args -p uart_device:=/dev/ttyACM0 -p baud_rate:=57600
-
-# 另一个终端：查看飞控实时数据
-source /opt/bros/humble/setup.bash
-source ~/drone_project/ros2_ws/install/setup.bash
+# 飞控状态
 ros2 topic echo /drone/status
-
-# 单次查看
-timeout 5 ros2 topic echo /drone/status --once
 
 # 发送指令
 ros2 topic pub /drone/command std_msgs/msg/String "{data: 'ARM'}"
-ros2 topic pub /drone/command std_msgs/msg/String "{data: 'TAKEOFF'}"
-ros2 topic pub /drone/command std_msgs/msg/String "{data: 'LAND'}"
-ros2 topic pub /drone/command std_msgs/msg/String "{data: 'RTL'}"
-ros2 topic pub /drone/command std_msgs/msg/String "{data: 'GUIDED 22.5 113.9 50'}"
+
+# 节点图
+rqt_graph
 ```
 
-### 5. Launch 方式启动（全部节点）
+## 推理节点参数
 
-```bash
-ros2 launch drone_bringup drone.launch.py uart_device:=/dev/ttyACM0
-```
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `model_path` | `~/spacemit-demo/.../yolov8n_320x320.q.onnx` | ONNX 模型路径 |
+| `confidence_threshold` | 0.3 | 置信度阈值 |
+| `iou_threshold` | 0.45 | NMS IoU 阈值 |
+| `num_threads` | 4 | EP 推理线程数 |
+| `person_only` | true | 仅检测 person (class_id=0) |
 
-### 6. 调参（无需重新编译）
+## ⚠️ 关键坑
 
-```bash
-ros2 launch drone_bringup drone.launch.py \
-  camera_device:=/dev/video20 \
-  uart_device:=/dev/ttyACM0 \
-  baud_rate:=115200
-```
-
-硬件参数在 `config/hardware.yaml` 中配置，launch 文件运行时从 `params.yaml` 加载。
+1. **导入顺序**: `import onnxruntime` 必须在 `import spacemit_ort` **之前**，否则段错误
+2. **TCM 权限**: `/dev/tcm` 默认 root-only，需 `sudo chmod 666 /dev/tcm`
+   - 永久修复: 已写 `/etc/udev/rules.d/99-tcm.rules`: `KERNEL=="tcm", MODE="0666"`
+3. **单 Session**: K1 只有 4 个 TCM block (共 512KB)，同一时刻只能一个 EP Session
+4. **EP 不带 provider_options**: 和官方 demo 一致，不传 `provider_options` 参数
 
 ## TODO
 
-- `drone_inference/inference_node.py` — YOLO 后处理（模型输出转检测框）
-- 模型量化流程（Spacemit NPU 执行提供者）
-- 纪同学气象模型集成（`weather_node` 中确认 weather_classes）
+- 后处理加速（DFL+NMS 占 47% 耗时）
+- 检测框坐标映射回原图（当前是模型输入空间坐标）
+- MAVLink 节点最大重连次数限制
 
 ## 摄像头
 
 - **设备**: Microdia Integrated Camera (USB UVC, `/dev/video20`)
-- **格式**: MJPG 1280x720@25fps（YUYV 1280x720@10fps 备选）
-- **后端**: V4L2 优先，GStreamer fallback
+- **格式**: MJPG 1280x720@25fps | YUYV 1280x720@10fps
+- **后端**: V4L2（OpenCV + RVV 加速）
 - **截图**: `python3 ~/snap.py` → `/home/bianbu/camera_latest.jpg`
 
 ## 关键资源
 
-- 进迭时空 ROS2 镜像: https://archive.spacemit.com/ros2/
-- ROS2 K1 文档: https://cdn-resource.spacemit.com/software/SDK/ros/docs-ros/zh/k1/intro.md
-- 进迭时空 AI Robot: MediaEngine（零拷贝/OpenCL加速）、RDK（量化/Model Zoo）
+- [本地知识库](docs/) — K1 AI 计算栈 / Demo 仓库 / 文档导航 / 技术速查
+- 进迭时空文档中心: https://www.spacemit.com/community/document
+- SpaceMIT EP: https://github.com/spacemit-com/onnxruntime
+- AI Demo 仓库: https://gitee.com/bianbu/spacemit-demo
+- 社区论坛: https://forum.spacemit.com
+- ROS2 镜像: https://archive.spacemit.com/ros2/

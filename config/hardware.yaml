@@ -1,26 +1,24 @@
 # K1 Drone Project - Hardware Configuration
-# /home/bianbu/drone_project/config/hardware.yaml
 
-# Camera
 camera:
-  device: "/dev/video20"     # USB camera (Microdia, uvcvideo)
-  format: "MJPG"             # MJPG: 1280x720@25fps; YUYV: 1280x720@10fps
+  device: "/dev/video20"
+  format: "MJPG"
   width: 1280
   height: 720
   fps: 25
 
-# UART to ArduPilot (GPIO UART)
+inference:
+  model_path: "/home/bianbu/spacemit-demo/examples/CV/yolov8/model/yolov8n_320x320.q.onnx"
+  confidence_threshold: 0.3
+  iou_threshold: 0.45
+  num_threads: 4
+  person_only: true
+
 uart:
-  device: "/dev/ttyS0"       # GPIO UART on 40-pin header
-  baud_rate: 57600           # ArduPilot default telem rate
+  device: "/dev/ttyS0"
+  baud_rate: 57600
   protocol: "MAVLink v2"
 
-# Model paths
-models:
-  object_detection: "/home/bianbu/drone_project/models/spacemit_demo/yolov8n_int8.onnx"
-  weather_classification: "/home/bianbu/drone_project/models/weather/weather_model.onnx"
-
-# GPIO (for status LED, buzzer, etc.)
 gpio:
   status_led: 18
   buzzer: 19

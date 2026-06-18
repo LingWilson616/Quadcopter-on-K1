@@ -11,18 +11,14 @@ def generate_launch_description():
     params_file = os.path.join(pkg_share, 'config', 'params.yaml')
 
     return LaunchDescription([
-        # ── Camera ──
         DeclareLaunchArgument('camera_device', default_value='/dev/video20'),
         DeclareLaunchArgument('camera_format', default_value='MJPG'),
         DeclareLaunchArgument('image_width', default_value='1280'),
         DeclareLaunchArgument('image_height', default_value='720'),
         DeclareLaunchArgument('fps', default_value='25'),
-
-        # ── UART ──
         DeclareLaunchArgument('uart_device', default_value='/dev/ttyACM0'),
         DeclareLaunchArgument('baud_rate', default_value='57600'),
 
-        # Camera node
         Node(
             package='drone_vision',
             executable='camera_node',
@@ -36,7 +32,6 @@ def generate_launch_description():
             respawn_delay=2.0,
         ),
 
-        # Inference node (object detection)
         Node(
             package='drone_inference',
             executable='inference_node',
@@ -47,7 +42,6 @@ def generate_launch_description():
             respawn_delay=2.0,
         ),
 
-        # Communication node (MAVLink over UART)
         Node(
             package='drone_communication',
             executable='mavlink_node',
@@ -56,17 +50,6 @@ def generate_launch_description():
                 'uart_device': LaunchConfiguration('uart_device'),
                 'baud_rate': LaunchConfiguration('baud_rate'),
             }],
-            output='screen',
-            respawn=True,
-            respawn_delay=2.0,
-        ),
-
-        # Weather detection node
-        Node(
-            package='drone_inference',
-            executable='weather_node',
-            name='weather_node',
-            parameters=[params_file],
             output='screen',
             respawn=True,
             respawn_delay=2.0,

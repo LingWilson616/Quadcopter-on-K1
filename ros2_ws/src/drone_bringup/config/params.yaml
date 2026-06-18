@@ -1,5 +1,5 @@
-# ROS2 parameter file — auto-loaded by launch
-# Override with: ros2 launch drone_bringup drone.launch.py --ros-args --params-file <path>
+# ROS2 parameter file for K1 Drone
+# Loaded via launch file. Override with --ros-args -p <param>:=<value>
 
 camera_node:
   ros__parameters:
@@ -11,15 +11,11 @@ camera_node:
 
 inference_node:
   ros__parameters:
-    model_path: "/home/bianbu/drone_project/models/spacemit_demo/yolov8n_int8.onnx"
-    confidence_threshold: 0.5
-    use_npu: true
-    task_type: "object_detection"
-
-weather_node:
-  ros__parameters:
-    model_path: "/home/bianbu/drone_project/models/weather/weather_model.onnx"
-    task_type: "weather_classification"
+    model_path: "/home/bianbu/spacemit-demo/examples/CV/yolov8/model/yolov8n_320x320.q.onnx"
+    confidence_threshold: 0.3
+    iou_threshold: 0.45
+    num_threads: 4
+    person_only: true
 
 mavlink_node:
   ros__parameters:

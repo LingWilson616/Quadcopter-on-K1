@@ -4,7 +4,7 @@ package_name = 'drone_inference'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.2.0',
     packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -14,12 +14,11 @@ setup(
     zip_safe=True,
     maintainer='bianbu',
     maintainer_email='bianbu@spacemit.com',
-    description='ONNX model inference node',
+    description='YOLOv8 ONNX inference node (SpaceMIT EP)',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
             'inference_node = drone_inference.inference_node:main',
-            'weather_node = drone_inference.inference_node:weather_main',
         ],
     },
 )
