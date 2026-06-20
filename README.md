@@ -1,40 +1,42 @@
-# Quadcopter-on-K1
+# K1 机载边缘 AI 感知平台
 
-基于进迭时空 SPACEMIT K1 (MUSE Pi Pro) 的 ROS2 无人机视觉系统。
+基于进迭时空 SPACEMIT K1 (MUSE Pi Pro) 的 ROS2 机载电脑适配方案——视觉目标检测 + 语音交互 + MAVLink 飞控通信。
 
 全国大学生嵌入式比赛项目。
 
 ## 项目概况
 
-- **主控板**: K1 (MUSE Pi Pro) — YOLOv8 人物检测 + UART 通信（ROS2 Humble）
-- **队友**: 黎同学（ArduPilot 飞控, GPIO UART）
-- **飞控**: ArduPilot on MicoAir743-AIO，通过 UART 连接 K1
-- **推理**: YOLOv8n 320×320 INT8 + SpaceMIT Execution Provider（~18 FPS ROS2 管道）
-- **语音**: SenseVoice Small ASR + Qwen2.5-0.5B LLM + espeak-ng TTS（需外接麦克风）
+- **主控板**: K1 (MUSE Pi Pro, RISC-V 8核) — 机载边缘计算平台
+- **感知能力**: YOLOv8n 人物检测（SpaceMIT NPU, 18 FPS）+ 语音指令交互（ASR+LLM+TTS）
+- **飞控通信**: MAVLink v2 over UART，适配 ArduPilot/PX4 生态
+- **架构**: ROS2 Humble 5 节点，模块化可裁剪
+- **应用场景**: 无人机机载电脑、UGV 车载感知、边缘 AI 监控
 
-## 数据流
+## 架构
 
 ```
-摄像头(USB UVC MJPG 1280x720@25fps /dev/video20)
-    ↓
-drone_vision (camera_node)
-    ↓ /camera/image_raw
-drone_inference (inference_node)  ← YOLOv8n INT8 + SpaceMIT EP
-    ↓ /drone/inference_result
-drone_communication (mavlink_node)
-    ↓ UART (MAVLink v2)
-ArduPilot 飞控（黎同学）
-    │
-    ↑ 遥测数据 (ATTITUDE, GLOBAL_POSITION_INT, SYS_STATUS ...)
-drone_communication (mavlink_node)
-    ↓ /drone/status (5Hz)
-控制台 / 其他 ROS2 节点
-
-# 语音控制支路（独立节点，按需启动）
-麦克风 → drone_voice (voice_node) — VAD→ASR→LLM→TTS
-    ↓ /drone/command (String)
-drone_communication (mavlink_node) — 执行飞控指令
+┌─────────────────────────────────────────────┐
+│          K1 机载边缘 AI 感知平台               │
+│                                              │
+│  摄像头 ──→ drone_vision ──→ drone_inference  │
+│              (V4L2取流)      (YOLOv8+NPU)     │
+│                                  │            │
+│  麦克风 ──→ drone_voice          │            │
+│              (ASR+LLM+TTS)       │            │
+│                │                 │            │
+│                └──────┬──────────┘            │
+│                       ↓ /drone/command        │
+│                  drone_communication          │
+│                   (MAVLink v2)                │
+└──────────────────────┼───────────────────────┘
+                       │ UART
+                  ┌────┴────┐
+                  │ 飞控     │  ← ArduPilot / PX4
+                  │ (适配层) │
+                  └─────────┘
 ```
+
+**设计理念**: K1 作为机载 companion computer，通过 ROS2 模块化架构提供感知能力（视觉+语音），经标准化 MAVLink 协议与飞控解耦通信。平台不绑定特定机型——更换飞控或载机只需调整 MAVLink 参数。
 
 ## ROS2 包
 
@@ -161,10 +163,11 @@ source install/setup.bash
 
 ## TODO
 
-- 外接麦克风（ES8326 I2S 或 USB）完成端到端语音控制测试
-- 后处理加速（DFL+NMS 占 47% 耗时）
+- 外接麦克风完成端到端语音控制闭环测试
+- 后处理加速（DFL+NMS 占 47% 耗时，C++/Numba 可提升至 30+ FPS）
 - 检测框坐标映射回原图（当前是模型输入空间坐标）
-- MAVLink 节点最大重连次数限制
+- MAVLink 节点断线重连上限 + 故障恢复策略
+- 实机挂载测试（K1 + 飞控 + 载机联调）
 
 ## 摄像头
 
