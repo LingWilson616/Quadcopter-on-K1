@@ -10,6 +10,7 @@
 - **队友**: 黎同学（ArduPilot 飞控, GPIO UART）
 - **飞控**: ArduPilot on MicoAir743-AIO，通过 UART 连接 K1
 - **推理**: YOLOv8n 320×320 INT8 + SpaceMIT Execution Provider（~18 FPS ROS2 管道）
+- **语音**: SenseVoice Small ASR + Qwen2.5-0.5B LLM + espeak-ng TTS（需外接麦克风）
 
 ## 数据流
 
@@ -28,6 +29,11 @@ ArduPilot 飞控（黎同学）
 drone_communication (mavlink_node)
     ↓ /drone/status (5Hz)
 控制台 / 其他 ROS2 节点
+
+# 语音控制支路（独立节点，按需启动）
+麦克风 → drone_voice (voice_node) — VAD→ASR→LLM→TTS
+    ↓ /drone/command (String)
+drone_communication (mavlink_node) — 执行飞控指令
 ```
 
 ## ROS2 包
@@ -38,6 +44,7 @@ drone_communication (mavlink_node)
 | drone_vision | V4L2 USB 摄像头 → ROS Image (MJPG 1280x720@25fps) | **已实测通过** |
 | drone_inference | YOLOv8n INT8 + SpaceMIT EP 人物检测 | **已实测通过** |
 | drone_communication | UART ↔ MAVLink v2 (pyserial + pymavlink) | **已实测通过** |
+| drone_voice | 语音交互 (VAD→ASR→LLM→TTS)，发布指令到 /drone/command | **已实测通过** |
 | drone_bringup | Launch 文件 + 参数管理 | 已就绪 |
 
 ## 推理性能
@@ -113,6 +120,27 @@ ros2 topic pub /drone/command std_msgs/msg/String "{data: 'ARM'}"
 rqt_graph
 ```
 
+### 5. 语音交互（需外接麦克风）
+
+```bash
+# K1 板载 ES8326 需要外接 I2S 麦克风，或使用 USB 麦克风
+# 确保 llama-server 已启动
+sudo systemctl start llama-server
+
+# 启动语音节点
+cd ~/drone_project
+source install/setup.bash
+~/drone_project/install/drone_voice/bin/voice_node
+
+# 对着麦克风说出指令（如"起飞""降落"），LLM 自动生成飞控命令
+```
+
+**语音管线**: PyAudio 48kHz 录音 → scipy 降采样 → SileroVAD 检测 → SenseVoice Small ASR → llama-server (Qwen2.5-0.5B) → 提取 [CMD:XXX] → 发布 /drone/command → espeak-ng TTS 回复
+
+**支持的语音指令**: 解锁/起飞/降落/返航（LLM 自动识别意图并映射到 ARM/TAKEOFF/LAND/RTL）
+
+**硬件要求**: ES8326 I2S 麦克风模块 或 USB 麦克风。USB 声卡（C-Media）仅有播放功能，不包含麦克风。
+
 ## 推理节点参数
 
 | 参数 | 默认值 | 说明 |
@@ -133,6 +161,7 @@ rqt_graph
 
 ## TODO
 
+- 外接麦克风（ES8326 I2S 或 USB）完成端到端语音控制测试
 - 后处理加速（DFL+NMS 占 47% 耗时）
 - 检测框坐标映射回原图（当前是模型输入空间坐标）
 - MAVLink 节点最大重连次数限制
