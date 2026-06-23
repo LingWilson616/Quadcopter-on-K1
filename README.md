@@ -122,26 +122,28 @@ ros2 topic pub /drone/command std_msgs/msg/String "{data: 'ARM'}"
 rqt_graph
 ```
 
-### 5. 语音交互（需外接麦克风）
+### 5. 语音交互（USB 麦克风 + USB 声卡）
 
 ```bash
-# K1 板载 ES8326 需要外接 I2S 麦克风，或使用 USB 麦克风
 # 确保 llama-server 已启动
 sudo systemctl start llama-server
 
 # 启动语音节点
-cd ~/drone_project
-source install/setup.bash
-~/drone_project/install/drone_voice/bin/voice_node
+source /opt/bros/humble/setup.bash
+source ~/drone_project/ros2_ws/install/setup.bash
+~/drone_project/ros2_ws/install/drone_voice/bin/voice_node
 
-# 对着麦克风说出指令（如"起飞""降落"），LLM 自动生成飞控命令
+# 对着 USB 麦克风说出指令（如"起飞""降落"），LLM 自动生成飞控命令
 ```
 
-**语音管线**: PyAudio 48kHz 录音 → scipy 降采样 → SileroVAD 检测 → SenseVoice Small ASR → llama-server (Qwen2.5-0.5B) → 提取 [CMD:XXX] → 发布 /drone/command → espeak-ng TTS 回复
+**语音管线**: `parec` (PipeWire source 75) 48kHz 取流 → scipy 降采样 → SileroVAD 端检 → SenseVoice Small ASR → llama-server (Qwen2.5-0.5B) → 提取 [CMD:XXX] → 发布 /drone/command → espeak-ng TTS → `aplay -D plughw:0,0` 播放
 
 **支持的语音指令**: 解锁/起飞/降落/返航（LLM 自动识别意图并映射到 ARM/TAKEOFF/LAND/RTL）
 
-**硬件要求**: ES8326 I2S 麦克风模块 或 USB 麦克风。USB 声卡（C-Media）仅有播放功能，不包含麦克风。
+**音频设备拓扑**:
+- **USB 声卡** (C-Media, card 0): 直连 K1 USB → 耳机/音箱输出，`aplay -D plughw:0,0`
+- **USB 麦克风** (TI PCM2902, card 2): 在扩展坞上 → 录音输入，PipeWire source 75
+- **板载 ES8326** (card 1): 不用（无物理麦克风，ADC 全零）
 
 ## 推理节点参数
 
@@ -163,7 +165,7 @@ source install/setup.bash
 
 ## TODO
 
-- 外接麦克风完成端到端语音控制闭环测试
+- TTS 中文自然度优化（espeak-ng → piper-tts 离线 VITS 方案）
 - 后处理加速（DFL+NMS 占 47% 耗时，C++/Numba 可提升至 30+ FPS）
 - 检测框坐标映射回原图（当前是模型输入空间坐标）
 - MAVLink 节点断线重连上限 + 故障恢复策略

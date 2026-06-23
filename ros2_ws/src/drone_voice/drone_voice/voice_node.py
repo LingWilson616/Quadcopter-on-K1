@@ -18,24 +18,37 @@ CMD_SYSTEM_PROMPT = '''你是K1无人机语音助手，用简体中文简短回�
 当用户要求执行飞行动作时，在回复末尾添加命令标签：
   [CMD:ARM] 解锁 / [CMD:TAKEOFF] 起飞 / [CMD:LAND] 降落 / [CMD:RTL] 返航'''
 
+# PipeWire device names (stable across USB ports)
+_PW_SOURCE = 'alsa_input.usb-C-Media_Electronics_Inc._USB_PnP_Sound_Device-00.analog-mono'
+_PW_SINK = 'USB_Audio_Device'
+DEV_RATE = 48000
+FRAME_SIZE = 1536  # 32ms @ 48kHz
+
+
+def _pick_device(pattern, pactl_cmd, name_hint):
+    '''Find a PipeWire device by matching pattern in ``pactl list short`` output.'''
+    r = subprocess.run(['pactl', 'list', 'short'] + pactl_cmd,
+                       capture_output=True, text=True)
+    for line in r.stdout.strip().split('\n'):
+        if pattern in line:
+            return line.split()[0]
+    return None
+
 
 class VoiceNode(Node):
     def __init__(self):
         super().__init__('voice_node')
 
-        # Publishers
         self.cmd_pub = self.create_publisher(String, '/drone/command', 10)
         self.text_pub = self.create_publisher(String, '/drone/voice_text', 10)
 
-        # State
         self._running = True
         self._ready = False
+        self._parec_proc = None
 
-        # Init heavy models in background so ROS2 doesn't timeout
         self._init_thread = threading.Thread(target=self._init_pipeline, daemon=True)
         self._init_thread.start()
 
-        # Heartbeat timer until ready
         self._hb_timer = self.create_timer(2.0, self._heartbeat)
 
     def _heartbeat(self):
@@ -45,35 +58,29 @@ class VoiceNode(Node):
             self.destroy_timer(self._hb_timer)
 
     def _init_pipeline(self):
-        '''Load ASR, VAD, configure audio — runs once in background thread.'''
         try:
             self.get_logger().info('Loading ASR model...')
             self.asr = ASRModel()
             self.get_logger().info('ASR model loaded')
 
-            # Audio routing
-            subprocess.run(['amixer', '-c', '1', 'cset', 'numid=9', '8'],
-                           capture_output=True)
-            subprocess.run(['amixer', '-c', '1', 'cset', 'numid=8', '3,3'],
-                           capture_output=True)
+            # --- Audio routing: USB mic for input, USB sound card for output ---
+            src_id = _pick_device('USB_PnP_Sound_Device', ['sources'], 'mic')
+            if src_id:
+                subprocess.run(['pactl', 'set-default-source', src_id],
+                               capture_output=True)
+                self.get_logger().info(f'Default source: {src_id}')
+            else:
+                self.get_logger().warn('USB mic not found, using system default')
 
-            r = subprocess.run(['pactl', 'list', 'short', 'sources'],
-                               capture_output=True, text=True)
-            for line in r.stdout.strip().split('\n'):
-                if 'alsa_input.platform-snd-card_1' in line:
-                    subprocess.run(['pactl', 'set-default-source', line.split()[0]],
-                                   capture_output=True)
-                    break
+            sink_id = _pick_device(_PW_SINK, ['sinks'], 'speaker')
+            if sink_id:
+                subprocess.run(['pactl', 'set-default-sink', sink_id],
+                               capture_output=True)
+                self.get_logger().info(f'Default sink: {sink_id}')
+            else:
+                self.get_logger().warn('USB audio device not found')
 
-            r2 = subprocess.run(['pactl', 'list', 'short', 'sinks'],
-                                capture_output=True, text=True)
-            for line in r2.stdout.strip().split('\n'):
-                if 'USB_Audio' in line:
-                    subprocess.run(['pactl', 'set-default-sink', line.split()[0]],
-                                   capture_output=True)
-                    break
-
-            # VAD
+            # --- VAD ---
             from scipy.signal import resample
             import onnxruntime as ort
             from collections import deque
@@ -84,41 +91,8 @@ class VoiceNode(Node):
             self.vad_sess = ort.InferenceSession(vad_path, providers=['CPUExecutionProvider'])
             self.get_logger().info('VAD model loaded')
 
-            # Find input device — suppress ALSA probe noise
-            import pyaudio
-            stderr_save = sys.stderr
-            sys.stderr = open('/dev/null', 'w')
-            try:
-                pa = pyaudio.PyAudio()
-            finally:
-                sys.stderr.close()
-                sys.stderr = stderr_save
-            self._pa = pa  # keep alive for voice loop
-            self.INPUT_INDEX = None
-            for i in range(pa.get_device_count()):
-                info = pa.get_device_info_by_index(i)
-                if info.get('maxInputChannels', 0) > 0 and 'default' in info.get('name', ''):
-                    self.INPUT_INDEX = i
-                    self.DEV_RATE = int(info.get('defaultSampleRate', 48000))
-                    break
-            if self.INPUT_INDEX is None:
-                for i in range(pa.get_device_count()):
-                    info = pa.get_device_info_by_index(i)
-                    if info.get('maxInputChannels', 0) > 0 and 'pipewire' in info.get('name', ''):
-                        self.INPUT_INDEX = i
-                        self.DEV_RATE = int(info.get('defaultSampleRate', 48000))
-                        break
-
-            if self.INPUT_INDEX is None:
-                self.get_logger().error('No capture device found')
-                return
-
-            self.FRAME_SIZE = 1536  # 32ms @ 48kHz
-            self.get_logger().info(
-                f'Voice pipeline ready (dev={self.INPUT_INDEX}, rate={self.DEV_RATE})')
             self._ready = True
-
-            # Start voice detection loop
+            self.get_logger().info('Voice pipeline ready — listening')
             self._voice_loop()
 
         except Exception as e:
@@ -127,15 +101,14 @@ class VoiceNode(Node):
             self.get_logger().error(traceback.format_exc())
 
     def _voice_loop(self):
-        '''Main voice detection loop — runs in background thread.'''
-        import pyaudio
+        SILENCE_MAX = int(2.5 * DEV_RATE / FRAME_SIZE)  # 2.5s silence → end
 
         while self._running:
             try:
-                stream = self._pa.open(
-                    format=pyaudio.paInt16, channels=1, rate=self.DEV_RATE,
-                    input=True, frames_per_buffer=self.FRAME_SIZE,
-                    input_device_index=self.INPUT_INDEX)
+                self._parec_proc = subprocess.Popen(
+                    ['parec', '--format=s16le', '--rate=48000', '--channels=1',
+                     '--device=' + _PW_SOURCE],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
                 vad_state = np.zeros((2, 1, 128), dtype=np.float32)
                 vad_ctx = np.zeros((1, 64), dtype=np.float32)
@@ -144,33 +117,34 @@ class VoiceNode(Node):
                 frames = []
                 recording = False
                 silent_count = 0
-                SILENCE_MAX = int(1.2 * self.DEV_RATE / self.FRAME_SIZE)
                 t_start = time.time()
 
                 while self._running:
-                    frame = stream.read(self.FRAME_SIZE, exception_on_overflow=False)
+                    raw = self._parec_proc.stdout.read(FRAME_SIZE * 2)
+                    if len(raw) < FRAME_SIZE * 2:
+                        break
 
-                    frame_np = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
-                    n_16k = int(len(frame_np) * 16000 / self.DEV_RATE)
+                    frame_np = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+                    n_16k = int(len(frame_np) * 16000 / DEV_RATE)
                     frame_16k = self.resample(frame_np, n_16k).astype(np.float32) / 32768.0
 
                     x = np.concatenate((vad_ctx, frame_16k[np.newaxis, :]), axis=1)
                     vad_ctx = x[:, -64:]
-                    prob, vad_state = self.vad_sess.run(
+                    prob_arr, vad_state = self.vad_sess.run(
                         None,
                         {'input': x.astype(np.float32), 'state': vad_state, 'sr': vad_sr})
-                    prob = float(prob)
+                    prob = float(prob_arr.flat[0])
 
-                    pre_buffer.append(frame)
+                    pre_buffer.append(raw)
 
-                    if prob > 0.45 and not recording:
+                    if prob > 0.3 and not recording:
                         recording = True
                         silent_count = 0
                         frames = list(pre_buffer)
                         self.get_logger().info('Speech detected')
 
                     if recording:
-                        frames.append(frame)
+                        frames.append(raw)
                         if prob < 0.25:
                             silent_count += 1
                         else:
@@ -178,37 +152,35 @@ class VoiceNode(Node):
                         if silent_count > SILENCE_MAX:
                             break
 
-                    if time.time() - t_start > 8:
+                    if time.time() - t_start > 10:
                         break
 
-                stream.stop_stream()
-                stream.close()
+                self._parec_proc.kill()
+                self._parec_proc.wait()
+                self._parec_proc = None
 
-                dur = len(frames) * self.FRAME_SIZE / self.DEV_RATE
+                dur = len(frames) * FRAME_SIZE / DEV_RATE
                 if not recording or dur < 0.5:
                     continue
 
                 # Resample to 16kHz for ASR
-                raw = b''.join(frames)
-                audio = np.frombuffer(raw, dtype=np.int16)
-                num = int(len(audio) * 16000 / self.DEV_RATE)
-                audio = self.resample(audio.astype(np.float32), num).astype(np.int16)
+                raw_audio = b''.join(frames)
+                audio = np.frombuffer(raw_audio, dtype=np.int16)
+                num = int(len(audio) * 16000 / DEV_RATE)
+                audio_16k = self.resample(audio.astype(np.float32), num).astype(np.int16)
 
                 # ASR
-                text = self.asr.generate(audio)
+                text = self.asr.generate(audio_16k)
                 if text is None or not text.strip():
                     self.get_logger().info('ASR: no text')
                     continue
                 self.get_logger().info(f'ASR: {text}')
-
-                # Publish recognized text
                 self.text_pub.publish(String(data=f'[ASR] {text}'))
 
                 # LLM
                 t0 = time.time()
                 reply = chat(text, system=CMD_SYSTEM_PROMPT, max_tokens=40)
-                self.get_logger().info(
-                    f'LLM ({time.time()-t0:.1f}s): {reply}')
+                self.get_logger().info(f'LLM ({time.time()-t0:.1f}s): {reply}')
                 self.text_pub.publish(String(data=f'[LLM] {reply}'))
 
                 # Extract command
@@ -218,16 +190,16 @@ class VoiceNode(Node):
                     self.get_logger().info(f'Command: {cmd}')
                     self.cmd_pub.publish(String(data=cmd))
 
-                # TTS — strip command tags
+                # TTS
                 clean = re.sub(r'\[CMD:\w+\]', '', reply)[:80].strip()
                 clean = clean.replace('"', '').replace("'", '')
                 if clean:
                     subprocess.run(
-                        ['espeak-ng', clean, '-v', 'zh', '-s', '160',
+                        ['espeak-ng', clean, '-v', 'zh', '-s', '160', '-a', '15',
                          '-w', '/tmp/tts_out.wav'],
                         capture_output=True, timeout=10)
                     subprocess.run(
-                        ['paplay', '/tmp/tts_out.wav'],
+                        ['aplay', '-q', '-D', 'plughw:0,0', '/tmp/tts_out.wav'],
                         capture_output=True, timeout=10)
 
             except Exception as e:
@@ -237,8 +209,9 @@ class VoiceNode(Node):
 
     def destroy(self):
         self._running = False
-        if hasattr(self, '_pa'):
-            self._pa.terminate()
+        if self._parec_proc is not None:
+            self._parec_proc.kill()
+            self._parec_proc.wait()
         super().destroy_node()
 
 
