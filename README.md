@@ -136,7 +136,11 @@ source ~/drone_project/ros2_ws/install/setup.bash
 # 对着 USB 麦克风说出指令（如"起飞""降落"），LLM 自动生成飞控命令
 ```
 
-**语音管线**: `parec` (PipeWire source 75) 48kHz 取流 → scipy 降采样 → SileroVAD 端检 → SenseVoice Small ASR → llama-server (Qwen2.5-0.5B) → 提取 [CMD:XXX] → 发布 /drone/command → espeak-ng TTS → `aplay -D plughw:0,0` 播放
+**语音管线**: `parec` (PipeWire source 75) 48kHz 取流 → scipy 降采样 → SileroVAD 端检 → SenseVoice Small ASR → llama-server (Qwen2.5-0.5B) → 提取 [CMD:XXX] → 发布 /drone/command → **MatchTTS** (pypinyin→Matcha+Vocos→Griffin-Lim) → `aplay -D plughw:0,0` 播放
+
+**TTS 模型**: MatchTTS (`matcha-icefall-zh-baker`, RTF ~0.7) + Vocos vocoder，中文自然语音，合成 ~3s/句  
+模型路径: `~/.cache/matcha-icefall-zh-baker/` + `~/.cache/vocos_22k.q.onnx`  
+下载: `archive.spacemit.com/spacemit-ai/model_zoo/tts/matcha-tts/matcha-icefall-zh-baker.tar.gz`
 
 **支持的语音指令**: 解锁/起飞/降落/返航（LLM 自动识别意图并映射到 ARM/TAKEOFF/LAND/RTL）
 
@@ -165,11 +169,11 @@ source ~/drone_project/ros2_ws/install/setup.bash
 
 ## TODO
 
-- TTS 中文自然度优化（espeak-ng → piper-tts 离线 VITS 方案）
+- TTS 合成优化（Griffin-Lim 降到 15 轮或修复 Vocos x/y ISTFT，目标 <2s）
+- LLM 响应稳定性（0.5B 中英文混杂，考虑 FC 模型做意图分派）
 - 后处理加速（DFL+NMS 占 47% 耗时，C++/Numba 可提升至 30+ FPS）
 - 检测框坐标映射回原图（当前是模型输入空间坐标）
 - MAVLink 节点断线重连上限 + 故障恢复策略
-- 实机挂载测试（K1 + 飞控 + 载机联调）
 
 ## 摄像头
 
