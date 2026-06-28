@@ -1,7 +1,7 @@
 #!/bin/bash
 # demo.sh — K1 Drone 竞赛演示视频脚本
-# 用法: ./tools/demo.sh [detect|voice|fc|all]
-# 分段展示: 人物检测 → 语音交互 → MAVLink通信 → 全链路
+# 用法: ./tools/demo.sh [fc|detect|voice|all]
+# 分段展示: MAVLink通信 → 人物检测 → 语音交互 → 全链路
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -93,11 +93,11 @@ check_env() {
 }
 
 # ═══════════════════════════════════════════════════════════
-# 场景1: 人物检测 + ROS2 拓扑
+# 场景2: 人物检测
 # ═══════════════════════════════════════════════════════════
 
 demo_detect() {
-    section "场景1 — 人物检测 (YOLOv8 + SpaceMIT EP)"
+    section "场景2 — 人物检测 (YOLOv8 + SpaceMIT EP)"
 
     info "启动摄像头 + 推理节点..."
     ros2 launch drone_bringup drone.launch.py \
@@ -160,11 +160,11 @@ print('  ✓ 已保存 /tmp/demo_detect.jpg')
 }
 
 # ═══════════════════════════════════════════════════════════
-# 场景2: 语音指令交互
+# 场景3: 语音指令交互
 # ═══════════════════════════════════════════════════════════
 
 demo_voice() {
-    section "场景2 — 语音指令交互 (ASR + LLM + TTS)"
+    section "场景3 — 语音指令交互 (ASR + LLM + TTS)"
 
     if ! curl -s --max-time 2 http://127.0.0.1:8081/v1/chat/completions \
         -d '{"messages":[{"role":"user","content":"hi"}],"max_tokens":3}' > /dev/null 2>&1; then
@@ -208,11 +208,11 @@ demo_voice() {
 }
 
 # ═══════════════════════════════════════════════════════════
-# 场景3: MAVLink 通信 + 虚拟飞控
+# 场景1: MAVLink 通信 + 虚拟飞控
 # ═══════════════════════════════════════════════════════════
 
 demo_fc() {
-    section "场景3 — MAVLink 通信 + 虚拟飞控"
+    section "场景1 — MAVLink 通信 + 虚拟飞控"
 
     PTY_FILE="/tmp/virtual_fc_pty.txt"
     rm -f "$PTY_FILE"
@@ -350,13 +350,13 @@ case "${1:-all}" in
     fc)     check_env; demo_fc ;;
     all)
         check_env
+        demo_fc
         demo_detect
         demo_voice
-        demo_fc
         demo_all
         ;;
     *)
-        echo "用法: ./tools/demo.sh [check|detect|voice|fc|all]"
+        echo "用法: ./tools/demo.sh [fc|detect|voice|check|all]"
         echo ""
         echo "  check   — 仅环境检查"
         echo "  detect  — 人物检测 + ROS2 拓扑展示"
