@@ -124,20 +124,26 @@ class MAVLinkNode(Node):
     def _read_loop(self):
         while self.running:
             try:
-                if not self.ser or not self.ser.is_open:
+                ser = self.ser
+                if not ser or not ser.is_open:
                     if self.running:
                         self._reconnect()
                     continue
 
                 try:
-                    data = self.ser.read(512)
-                except serial.SerialException:
+                    data = ser.read(512)
+                except (serial.SerialException, TypeError, AttributeError):
                     if not self.running:
                         continue
                     time.sleep(0.3)
+                    ser = self.ser
+                    if ser is None or not ser.is_open:
+                        if self.running:
+                            self._reconnect()
+                        continue
                     try:
-                        data = self.ser.read(512)
-                    except serial.SerialException:
+                        data = ser.read(512)
+                    except (serial.SerialException, TypeError, AttributeError):
                         if self.running:
                             self.get_logger().warn('ACM read failed, reconnecting...')
                             self._reconnect()

@@ -58,14 +58,12 @@ class InferenceNode(Node):
     def _load_model(self, path, num_threads):
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = num_threads
-        self.session = ort.InferenceSession(
-            path, opts, ['SpaceMITExecutionProvider'],
-        )
+        self.session = ort.InferenceSession(path, opts, ['CPUExecutionProvider'])
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = tuple(self.session.get_inputs()[0].shape[2:4])
         self.output_names = [o.name for o in self.session.get_outputs()]
-        self.get_logger().info(f'Model loaded: {path}')
-        self.get_logger().info(f'Input: {self.input_name} {self.session.get_inputs()[0].shape}')
+        self.get_logger().info(f'Model loaded (CPU): {path}')
+        self.get_logger().info(f'Input shape: {self.input_shape}')
 
     # ── callback ──────────────────────────────────────────────
 

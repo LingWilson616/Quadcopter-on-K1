@@ -55,11 +55,11 @@ def generate_launch_description():
             respawn_delay=2.0,
         ),
 
-        # Voice interaction node — uncomment to enable voice control
-        # Node(
-        #     package='drone_voice',
-        #     executable='voice_node',
-        #     name='voice_node',
-        #     output='screen',
-        # ),
+        # Voice interaction node
+        Node(
+            package='drone_voice',
+            executable='voice_node',
+            name='voice_node',
+            output='screen',
+        ),
     ])
