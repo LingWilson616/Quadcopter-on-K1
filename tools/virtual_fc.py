@@ -292,6 +292,14 @@ class VirtualFC:
         print(f"  PTY: {self.slave_path}")
         print(f"  Use: uart_device:={self.slave_path}")
         print(f"{'='*60}")
+
+        # Write PTY path to temp file for automated scripts
+        try:
+            with open('/tmp/virtual_fc_pty.txt', 'w') as f:
+                f.write(self.slave_path)
+        except Exception:
+            pass
+
         self.start()
 
         while self.running:

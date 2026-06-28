@@ -60,7 +60,8 @@ check_env() {
 
     step "AI 加速器 (TCM)"
     if [ -c /dev/tcm ] && [ -r /dev/tcm ]; then
-        info "/dev/tcm ✓  ($(spacemit-tcm-smi 2>/dev/null | grep 'block_num' || echo '4 blocks'))"
+        BLOCKS=$(echo bianbu | sudo -S spacemit-tcm-smi 2>/dev/null | grep -o 'block_num=[0-9]*' | cut -d= -f2)
+        info "/dev/tcm ✓  (${BLOCKS:-4} blocks)"
     else
         info "/dev/tcm ✗  EP 不可用，将回退 CPU"
     fi
@@ -75,8 +76,10 @@ check_env() {
     fi
 
     step "ROS2 节点"
+    source /opt/bros/humble/setup.bash 2>/dev/null || source /opt/ros/humble/setup.bash 2>/dev/null
+    source "$PROJECT_DIR/ros2_ws/install/setup.bash" 2>/dev/null
     PKGS=$(ros2 pkg list 2>/dev/null | grep -c 'drone_' || echo 0)
-    info "${PKGS} 个 drone_ 包已安装"
+    info "${PKGS} 个 drone_ 包已编译"
 
     step "语音服务"
     if curl -s --max-time 2 http://127.0.0.1:8081/v1/chat/completions \
@@ -211,15 +214,18 @@ demo_voice() {
 demo_fc() {
     section "场景3 — MAVLink 通信 + 虚拟飞控"
 
+    PTY_FILE="/tmp/virtual_fc_pty.txt"
+    rm -f "$PTY_FILE"
+
     info "启动虚拟 ArduPilot 飞控..."
     python3 "$PROJECT_DIR/tools/virtual_fc.py" &
     FC_PID=$!
-    sleep 1.5
 
-    # 找 PTY
+    # 等待 PTY 文件出现
     PTY=""
-    for p in /dev/pts/*; do
-        [ "$(stat -c '%U' "$p" 2>/dev/null)" = "$USER" ] && PTY="$p"
+    for i in $(seq 1 10); do
+        sleep 0.5
+        [ -f "$PTY_FILE" ] && PTY=$(cat "$PTY_FILE") && [ -n "$PTY" ] && break
     done
     info "虚拟飞控: $PTY  (PID=$FC_PID)"
 
@@ -261,6 +267,7 @@ demo_fc() {
 
     kill $LAUNCH_PID 2>/dev/null; wait $LAUNCH_PID 2>/dev/null
     kill $FC_PID 2>/dev/null; wait $FC_PID 2>/dev/null
+    rm -f "$PTY_FILE"
     pause
 }
 
@@ -270,6 +277,8 @@ demo_fc() {
 
 demo_all() {
     section "场景4 — 全链路集成演示"
+    PTY_FILE="/tmp/virtual_fc_pty.txt"
+    rm -f "$PTY_FILE"
 
     info "5 个 ROS2 节点同时运行:"
     info "  camera_node → inference_node → mavlink_node → voice_node"
@@ -278,10 +287,15 @@ demo_all() {
     step "启动全节点"
     python3 "$PROJECT_DIR/tools/virtual_fc.py" &
     FC_PID=$!
-    sleep 1.5
     PTY=""
-    for p in /dev/pts/*; do
-        [ "$(stat -c '%U' "$p" 2>/dev/null)" = "$USER" ] && PTY="$p"
+    for i in $(seq 1 10); do
+        sleep 0.5
+        [ -f "$PTY_FILE" ] && PTY=$(cat "$PTY_FILE") && [ -n "$PTY" ] && break
+    done
+    info "虚拟飞控: $PTY"
+
+    ros2 launch drone_bringup drone.launch.py uart_device:="$PTY" &
+    LAUNCH_PID=$!
     done
     info "虚拟飞控: $PTY"
 
@@ -322,6 +336,7 @@ demo_all() {
 
     kill $LAUNCH_PID 2>/dev/null; wait $LAUNCH_PID 2>/dev/null
     kill $FC_PID 2>/dev/null; wait $FC_PID 2>/dev/null
+    rm -f "$PTY_FILE"
 }
 
 # ═══════════════════════════════════════════════════════════
